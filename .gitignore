@@ -1,0 +1,30 @@
+# 凭据与运行时产物，永远不要提交
+config.json
+config.local.json
+state.json
+realtime.json
+realtime.lock
+realtime.log
+.activity-cache.json
+*.log
+
+# 导出的记忆里是私人聊天内容
+memory/astrbot/
+memory/dsh-notes.jsonl
+memory/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 构建产物
+dist/
+build/
+*.spec
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

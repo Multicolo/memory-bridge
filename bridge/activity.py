@@ -333,7 +333,7 @@ def preview(workspace: Path, days: int = 30, limit: int = 5) -> list[dict]:
 
 
 def _decode_dir(name: str) -> str:
-    """`--C-Users-Administrator-Documents-ws--` → `C:\\Users\\Administrator\\Documents\\ws`。
+    """`--C-Users-me-Documents-ws--` → `C:\\Users\\me\\Documents\\ws`。
 
     目录名里 `-` 同时充当路径分隔符，所以这只是个近似值；真值优先用
     read_meta() 从会话文件头里读出来的 cwd。

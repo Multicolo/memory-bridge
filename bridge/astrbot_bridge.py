@@ -41,10 +41,14 @@ WORKSPACE = MEM_ROOT.parent                 # 工作区根目录
 DEFAULT_NOTE_FILE = MEM_ROOT / "dsh-notes.jsonl"
 STATE_FILE = Path(os.environ.get("MEMORY_BRIDGE_STATE") or (MEM_ROOT / "bridge" / "state.json"))
 EXPORT_DIR = MEM_ROOT / "astrbot"
+BUNDLE_DIR = MEM_ROOT / "bundles"
 CFG_FILE = Path(os.environ.get("MEMORY_BRIDGE_CONFIG") or (MEM_ROOT / "bridge" / "config.json"))
 # 面板配置：优先用环境变量指定的文件，其次看本目录的 config.json（便携版就这么用）。
 # 空字符串表示"没有外部面板配置"，这时只认 config.json / 环境变量。
-PANEL_CFG = Path(os.environ.get("QQBOT_PANEL_CONFIG", ""))
+_PANEL_DEFAULT = Path(os.environ.get("LOCALAPPDATA", "")) / "AstrBotPanel" / "config.json"
+_PANEL_ALT = Path.home() / "AstrBotPanel" / "config.json"
+PANEL_CFG = Path(os.environ.get("QQBOT_PANEL_CONFIG") or
+                 (_PANEL_ALT if _PANEL_ALT.exists() else _PANEL_DEFAULT))
 
 LM = "astrbot_plugin_livingmemory"
 API_PREFIX = f"/api/plug/{LM}/page"
@@ -139,7 +143,7 @@ def _request(url: str, method: str = "GET", body: dict | None = None,
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:500]
         raise ApiError(f"HTTP {e.code} {url}: {detail}") from None
-    except (urllib.error.URLError, socket.timeout) as e:
+    except (urllib.error.URLError, socket.timeout, OSError) as e:
         raise ApiError(f"连接失败 {url}: {e}") from None
     if raw:
         return payload
@@ -149,7 +153,8 @@ def _request(url: str, method: str = "GET", body: dict | None = None,
 def _is_tunnel_down(err: Exception) -> bool:
     """本地 6185 端口像是隧道断了（而不是 AstrBot 本身报错）。"""
     msg = str(err).lower()
-    return any(k in msg for k in ("积极拒绝", "refused", "10054", "强迫关闭", "timed out", "超时"))
+    return any(k in msg for k in ("积极拒绝", "refused", "10054", "强迫关闭", "timed out", "超时",
+                                  "closed connection", "without response", "connection reset"))
 
 
 class AstrBot:
@@ -304,25 +309,47 @@ class AstrBot:
         if self.panel_cookie and not force:
             return
         pin = self.cfg.get("pin", "")
-        req = urllib.request.Request(
-            self.cfg["panel"].rstrip("/") + "/api/login",
-            data=json.dumps({"pin": pin}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        # 面板被看门狗重启后 accessPin 会变（有时变成 astrbot 密码，有时清空），
+        # 所以每次都重读面板配置，并且把「空口令」也当作候选。
+        fresh = ""
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
-                cookies = r.headers.get_all("Set-Cookie") or []
-        except urllib.error.HTTPError as e:
-            raise ApiError(f"面板口令被拒绝（pin={pin!r}）: {e.read()[:200]!r}") from None
-        for c in cookies:
-            if c.lower().startswith("qbp="):
-                self.panel_cookie = c.split(";", 1)[0]
+            if PANEL_CFG.exists():
+                fresh = str(json.loads(PANEL_CFG.read_text(encoding="utf-8-sig")).get("accessPin") or "")
+        except Exception:
+            fresh = ""
+        candidates = []
+        for c in (pin, fresh, ""):
+            if c not in candidates:
+                candidates.append(c)
+        tried = []
+        last_err = None
+        for candidate in candidates:
+            tried.append(candidate)
+            req = urllib.request.Request(
+                self.cfg["panel"].rstrip("/") + "/api/login",
+                data=json.dumps({"pin": candidate}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    cookies = r.headers.get_all("Set-Cookie") or []
+            except urllib.error.HTTPError as e:
+                last_err = e
+                continue
+            for c in cookies:
+                if c.lower().startswith("qbp="):
+                    self.panel_cookie = c.split(";", 1)[0]
+                    self.cfg["pin"] = candidate
+                    return
+            if not cookies:
+                self.panel_cookie = ""  # 面板未设口令
+                self.cfg["pin"] = candidate
                 return
-        if not cookies:
-            self.panel_cookie = ""  # 面板未设口令
-            return
-        raise ApiError("面板登录失败：没有拿到会话 Cookie")
+            raise ApiError("面板登录失败：没有拿到会话 Cookie")
+        if last_err is not None:
+            raise ApiError(f"面板口令被拒绝（试过 {tried}）: {last_err.read()[:200]!r}") from None
+        raise ApiError("面板登录失败")
 
     def messages(self, limit: int = 120, session: str = "") -> list:
         body = {"limit": max(1, min(int(limit), 300))}
@@ -530,16 +557,17 @@ def _norm_memories(data) -> list[dict]:
         content = m.get("content") or m.get("text") or m.get("memory") or ""
         if not str(content).strip():
             continue
+        md = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
         out.append({
-            "id": m.get("id") or m.get("memory_id") or "",
+            "id": str(m.get("id") or m.get("memory_id") or m.get("original_id") or ""),
             "content": str(content).strip(),
             "importance": m.get("importance"),
-            "session_id": m.get("session_id") or "",
-            "persona_id": m.get("persona_id") or "",
-            "created_at": m.get("created_at") or m.get("timestamp") or "",
+            "session_id": m.get("session_id") or md.get("session_id") or "",
+            "persona_id": m.get("persona_id") or md.get("persona_id") or "",
+            "created_at": m.get("created_at") or m.get("timestamp") or md.get("create_time") or md.get("ts") or "",
             "updated_at": m.get("updated_at") or "",
-            "status": m.get("status") or "",
-            "metadata": m.get("metadata") or {},
+            "status": m.get("status") or md.get("status") or "",
+            "metadata": md,
         })
     return out
 
@@ -710,12 +738,37 @@ def cmd_status(bot: AstrBot) -> int:
     return 0
 
 
-def cmd_pull(bot: AstrBot, chats: int) -> int:
+def _filter_memories(memories: list[dict], persona: str = "", session: str = "",
+                     ids: list | None = None) -> list[dict]:
+    """按人格 / 会话 / 记忆 id 挑记忆。空条件表示不过滤。"""
+    want_ids = {str(i) for i in (ids or []) if str(i)}
+    out = []
+    for m in memories:
+        if want_ids and str(m.get("id") or m.get("original_id") or "") not in want_ids:
+            continue
+        if persona and str(m.get("persona_id") or "") != persona:
+            continue
+        if session and str(m.get("session_id") or "") != session:
+            continue
+        out.append(m)
+    return out
+
+
+def cmd_pull(bot: AstrBot, chats: int, persona: str = "") -> int:
+    """拉取 bot 的记忆到本地。
+
+    persona 给了就只拉这个人格的记忆（"只传一个人格"而不是全部），
+    对话也只保留跟这些记忆有关的会话。
+    """
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stats = bot.stats()
-    memories = _norm_memories(bot.export_memories())
+    all_memories = _norm_memories(bot.export_memories())
+    memories = _filter_memories(all_memories, persona=persona)
     personas = bot.personas()
+    if persona:
+        personas = [p for p in personas if str(p.get("persona_id") or "") == persona] or \
+                   [{"persona_id": persona}]
 
     msgs: list[dict] = []
     chat_err = None
@@ -726,6 +779,11 @@ def cmd_pull(bot: AstrBot, chats: int) -> int:
             umo = str(s.get("session") or "")
             if umo:
                 targets.append((umo, str(s.get("last") or "")))
+        if persona:
+            keep = {str(m.get("session_id") or "") for m in memories}
+            keep.discard("")
+            if keep:
+                targets = [t for t in targets if t[0] in keep]
         if not targets:
             targets = [("", "")]
         for umo, last in targets:
@@ -740,10 +798,11 @@ def cmd_pull(bot: AstrBot, chats: int) -> int:
         chat_err = str(e)
 
     (EXPORT_DIR / "memories.json").write_text(
-        json.dumps({"exported_at": now, "stats": stats, "memories": memories, "personas": personas},
+        json.dumps({"exported_at": now, "stats": stats, "memories": all_memories, "personas": personas},
                    ensure_ascii=False, indent=2), encoding="utf-8")
-    meta = {"exported_at": now, "base": bot.base,
-            "memory_count": len(memories), "message_count": len(msgs), "chat_error": chat_err}
+    meta = {"exported_at": now, "base": bot.base, "persona": persona,
+            "memory_count": len(memories), "total_memory_count": len(all_memories),
+            "message_count": len(msgs), "chat_error": chat_err}
     (EXPORT_DIR / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     (EXPORT_DIR / "MEMORY.md").write_text(build_memory_md(memories, stats, meta), encoding="utf-8")
     (EXPORT_DIR / "DIGEST.md").write_text(
@@ -756,6 +815,10 @@ def cmd_pull(bot: AstrBot, chats: int) -> int:
     save_state(st)
 
     print(f"已拉取：记忆 {len(memories)} 条 · 对话 {len(msgs)} 条 · 人设 {len(personas)} 个 -> {EXPORT_DIR}")
+    if persona:
+        print(f"  按人格过滤：{persona}（原始 {len(all_memories)} 条，命中 {len(memories)} 条；"
+              f"本地 memories.json 仍保留全量，方便之后再挑别的）")
+    print(f"  本地全量记忆：{len(all_memories)} 条")
     if chat_err:
         print(f"  ! 对话拉取失败：{chat_err}")
     return 0
@@ -977,6 +1040,270 @@ def cmd_activity(bot: AstrBot, dry_run: bool = False, days: int = 30, limit: int
     return rc
 
 
+def persona_stats(memories: list[dict]) -> list[dict]:
+    """按人格聚合记忆条数与涉及的会话，给界面下拉框用。"""
+    agg: dict[str, dict] = {}
+    for m in memories:
+        pid = str(m.get("persona_id") or "")
+        row = agg.setdefault(pid, {"persona_id": pid, "count": 0, "sessions": set()})
+        row["count"] += 1
+        sid = str(m.get("session_id") or "")
+        if sid:
+            row["sessions"].add(sid)
+    out = []
+    for row in agg.values():
+        row["sessions"] = sorted(row["sessions"])
+        out.append(row)
+    return sorted(out, key=lambda x: (-x["count"], x["persona_id"]))
+
+
+def cmd_personas(bot: AstrBot) -> int:
+    memories = _norm_memories(bot.export_memories())
+    rows = persona_stats(memories)
+    print(f"共 {len(memories)} 条记忆，{len(rows)} 个人格维度：")
+    for r in rows:
+        name = r["persona_id"] or "（无人格 / 全局）"
+        print(f"  - {name}: {r['count']} 条 · 会话 {len(r['sessions'])} 个")
+        for s in r["sessions"]:
+            print(f"      {session_label(s)}")
+    return 0
+
+
+def _load_export(path: Path) -> list[dict]:
+    if not path.exists():
+        raise SystemExit(f"没有导出文件：{path}（先跑 pull）")
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    return _norm_memories(data)
+
+
+def cmd_transfer(bot: AstrBot, path: Path, ids: list | None = None, persona: str = "",
+                 session: str = "", to_persona: str = "", dry_run: bool = False) -> int:
+    """把本地导出里的指定记忆（按 id / 人格）写到目标会话。
+
+    - 只给 --persona：这个人格的记忆全传（"选择一个人格"）
+    - 给 --ids：只传勾中的那几条
+    - 不给 --session：写到所有活跃会话（每个会话各一份）
+    """
+    memories = _load_export(path)
+    picked = _filter_memories(memories, persona=persona, ids=ids)
+    if not picked:
+        print("没有符合条件的记忆可传。")
+        return 1
+
+    targets = ([{"session": session, "persona": to_persona or bot.default_persona()}]
+               if session else bot.targets())
+    if to_persona:
+        targets = [dict(t, persona=to_persona) for t in targets]
+    if not targets:
+        print("没有目标会话可写。")
+        return 1
+
+    print(f"选中记忆 {len(picked)} 条 × {len(targets)} 个目标会话"
+          + ("（dry-run）" if dry_run else ""))
+    rc = 0
+    for t in targets:
+        memories_payload = []
+        for m in picked:
+            meta = {"source": "transferred", "origin_id": str(m.get("id") or ""),
+                    "origin_session": str(m.get("session_id") or ""), "ts": datetime.now().isoformat(timespec="seconds")}
+            memories_payload.append({
+                "content": m["content"],
+                "importance": float(m.get("importance") or 0.6),
+                "session_id": t["session"],
+                "persona_id": t["persona"] or "",
+                "metadata": meta,
+            })
+        try:
+            pre = bot.import_memories(memories_payload, dry_run=True)
+            print(f"  [{session_label(t['session'])}] persona={t['persona'] or '（默认）'} "
+                  f"valid={pre.get('valid_count')} duplicate={pre.get('duplicate_count')} "
+                  f"planned={pre.get('planned_import_count')}")
+            if dry_run:
+                continue
+            res = bot.import_memories(memories_payload, dry_run=False)
+        except ApiError as e:
+            print(f"  ! 写入失败：{e}")
+            rc = 1
+            continue
+        failed = int(res.get("failed_count") or 0)
+        print(f"    imported={res.get('imported_count')} skipped={res.get('skipped_duplicate_count')} failed={failed}")
+        if res.get("errors"):
+            print(f"    ! {json.dumps(res['errors'], ensure_ascii=False)[:300]}")
+        if failed:
+            rc = 1
+    return rc
+
+
+BUNDLE_FORMAT = "memory-bridge.persona"
+BUNDLE_VERSION = 1
+
+
+def _scrub_text(text: str) -> str:
+    """分享前把容易泄露身份的东西抹掉：QQ 号、IP、邮箱、API key。
+
+    额外要抹的词放环境变量 `MEMORY_BRIDGE_REDACT`（逗号分隔），
+    比如昵称、真名——写死在代码里的话，这行代码自己就成了泄露源。
+    """
+    s = str(text or "")
+    s = re.sub(r"\b[0-9a-zA-Z._%+-]+@[0-9a-zA-Z.-]+\.[A-Za-z]{2,}\b", "<邮箱>", s)
+    s = re.sub(r"\b(?:sk|abk)[-_][A-Za-z0-9._-]{8,}\b", "<API_KEY>", s)
+    s = re.sub(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])", "<IP>", s)
+    s = re.sub(r"(?<![\d.])\d{5,12}(?![\d.])", "<号码>", s)
+    for word in (os.environ.get("MEMORY_BRIDGE_REDACT") or "").split(","):
+        word = word.strip()
+        if word:
+            s = s.replace(word, "<昵称>")
+    return s
+
+
+def _scrub_persona(pdef: dict) -> dict:
+    out = dict(pdef or {})
+    if out.get("system_prompt"):
+        out["system_prompt"] = _scrub_text(out["system_prompt"])
+    if isinstance(out.get("begin_dialogs"), list):
+        out["begin_dialogs"] = [_scrub_text(x) if isinstance(x, str) else x for x in out["begin_dialogs"]]
+    return out
+
+
+def cmd_bundle_export(bot: AstrBot, persona: str, out: str = "", sanitize: bool = False) -> int:
+    """把一个人格的定义 + 它的记忆打成一个可搬运的 JSON 包。"""
+    if not persona:
+        print("需要 --persona 指定要导出哪个人格（先用 personas 子命令看有哪些）。")
+        return 1
+    memories = _filter_memories(_norm_memories(bot.export_memories()), persona=persona)
+    if not memories:
+        print(f"人格 {persona} 没有记忆可导出。")
+        return 1
+    # 同一条记忆在每个会话里各存一份，打包时按内容去重（留重要度高的那条）
+    uniq: dict[str, dict] = {}
+    for m in memories:
+        key = re.sub(r"\s+", "", m["content"]).lower()
+        cur = uniq.get(key)
+        if cur is None or (m.get("importance") or 0) > (cur.get("importance") or 0):
+            uniq[key] = m
+    raw_count, memories = len(memories), list(uniq.values())
+    if raw_count != len(memories):
+        print(f"  按内容去重：{raw_count} 条 -> {len(memories)} 条")
+    pdef = next((p for p in bot.personas() if str(p.get("persona_id") or "") == persona), None)
+    if pdef is None:
+        print(f"  ! 面板里没找到人格定义，只导出记忆（{persona}）")
+        pdef = {"persona_id": persona}
+
+    rows = []
+    for m in memories:
+        row = {
+            "id": str(m.get("id") or ""),
+            "content": _scrub_text(m["content"]) if sanitize else m["content"],
+            "importance": m.get("importance"),
+            "created_at": m.get("created_at") or "",
+        }
+        if not sanitize:
+            row["session_id"] = str(m.get("session_id") or "")
+            row["persona_id"] = str(m.get("persona_id") or "")
+            md = dict(m.get("metadata") or {})
+            md.pop("session_key", None)
+            row["metadata"] = md
+        rows.append(row)
+
+    bundle = {
+        "format": BUNDLE_FORMAT,
+        "version": BUNDLE_VERSION,
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sanitized": bool(sanitize),
+        "persona": _scrub_persona(pdef) if sanitize else pdef,
+        "sessions": [] if sanitize else sorted({str(m.get("session_id") or "") for m in memories} - {""}),
+        "memories": rows,
+        "counts": {"memories": len(rows)},
+    }
+    if out:
+        target = Path(out)
+    else:
+        safe = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_.-]+", "_", persona)[:40] or "persona"
+        target = BUNDLE_DIR / f"{safe}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"人格包：{target}（{len(rows)} 条记忆，脱敏={'是' if sanitize else '否'}）")
+    return 0
+
+
+def _ensure_persona(bot: AstrBot, pdef: dict) -> bool:
+    """目标 bot 没有这个人格时，尝试用面板接口建一个；失败只提示不中断。"""
+    pid = str(pdef.get("persona_id") or "")
+    if not pid:
+        return False
+    try:
+        if any(str(p.get("persona_id") or "") == pid for p in bot.personas()):
+            return True
+    except ApiError:
+        return False
+    body = {k: v for k, v in pdef.items() if k in
+            ("persona_id", "system_prompt", "begin_dialogs", "tools", "name")}
+    body.setdefault("persona_id", pid)
+    for path in ("/api/persona/create", "/api/persona/add"):
+        try:
+            bot.api(path, "POST", body)
+            print(f"  已在目标 bot 里创建人格：{pid}")
+            return True
+        except ApiError:
+            continue
+    print(f"  ! 目标 bot 没有人格 {pid}，也没能自动创建；记忆仍会导入，但该人格下召回不到。")
+    return False
+
+
+def cmd_bundle_import(bot: AstrBot, path: Path, session: str = "", persona: str = "",
+                      dry_run: bool = False) -> int:
+    """导入人格包：人格定义（尽力创建）+ 包里的记忆。"""
+    if not path.exists():
+        print(f"没有这个文件：{path}")
+        return 1
+    bundle = json.loads(path.read_text(encoding="utf-8-sig"))
+    if str(bundle.get("format") or "") != BUNDLE_FORMAT:
+        print(f"不是人格包（format={bundle.get('format')!r}）")
+        return 1
+    pdef = dict(bundle.get("persona") or {})
+    target_persona = persona or str(pdef.get("persona_id") or "")
+    rows = bundle.get("memories") or []
+    if not rows:
+        print("包里没有记忆。")
+        return 1
+    print(f"人格包：{target_persona or '（无人格）'} · {len(rows)} 条记忆"
+          + ("（dry-run）" if dry_run else ""))
+    if not dry_run:
+        _ensure_persona(bot, pdef)
+
+    targets = ([{"session": session, "persona": target_persona}] if session else bot.targets())
+    if not targets:
+        targets = [{"session": "dsh-workspace", "persona": target_persona}]
+    if any(not t.get("persona") for t in targets):
+        targets = [dict(t, persona=target_persona) for t in targets]
+
+    rc = 0
+    for t in targets:
+        payload = [{
+            "content": r.get("content") or "",
+            "importance": float(r.get("importance") or 0.6),
+            "session_id": t["session"],
+            "persona_id": t["persona"] or "",
+            "metadata": {"source": "persona-bundle", "bundle": Path(path).name},
+        } for r in rows if str(r.get("content") or "").strip()]
+        try:
+            pre = bot.import_memories(payload, dry_run=True)
+            print(f"  [{session_label(t['session'])}] planned={pre.get('planned_import_count')} "
+                  f"duplicate={pre.get('duplicate_count')}")
+            if dry_run:
+                continue
+            res = bot.import_memories(payload, dry_run=False)
+        except ApiError as e:
+            print(f"  ! {e}")
+            rc = 1
+            continue
+        print(f"    imported={res.get('imported_count')} skipped={res.get('skipped_duplicate_count')} "
+              f"failed={res.get('failed_count')}")
+        if res.get("errors"):
+            print(f"    ! {json.dumps(res['errors'], ensure_ascii=False)[:300]}")
+    return rc
+
+
 def cmd_note(text: str, importance: float, tags: list[str]) -> int:
     text = _clean_text(text)
     if not text:
@@ -1094,8 +1421,30 @@ def main(argv: list[str]) -> int:
 
     sub.add_parser("status", help="查看双向状态")
 
-    pp = sub.add_parser("pull", help="从 AstrBot 拉取记忆/对话/人设")
+    pp = sub.add_parser("pull", help="从 AstrBot 拉取记忆/对话/人设（可只拉一个人格）")
     pp.add_argument("--chats", type=int, default=120)
+    pp.add_argument("--persona", default="", help="只拉这个人格的记忆，默认全部")
+
+    sub.add_parser("personas", help="列出人格维度的记忆条数与会话")
+
+    pt = sub.add_parser("transfer", help="把导出文件里选中的记忆传送到目标会话")
+    pt.add_argument("--file", default=str(EXPORT_DIR / "memories.json"))
+    pt.add_argument("--ids", default="", help="逗号分隔的记忆 id，只传这几条")
+    pt.add_argument("--persona", default="", help="只传这个人格的记忆")
+    pt.add_argument("--session", default="", help="只写到这个会话（默认所有活跃会话）")
+    pt.add_argument("--to-persona", default="", help="写入时用的人格，默认 bot 默认人格")
+    pt.add_argument("--dry-run", action="store_true")
+
+    pb = sub.add_parser("bundle-export", help="把一个人格 + 它的记忆打成可搬运的 JSON 包")
+    pb.add_argument("--persona", required=True)
+    pb.add_argument("--out", default="")
+    pb.add_argument("--sanitize", action="store_true", help="去掉会话 id 与元数据，方便分享")
+
+    bi = sub.add_parser("bundle-import", help="导入人格包（人格定义 + 记忆）")
+    bi.add_argument("--file", required=True)
+    bi.add_argument("--session", default="", help="只写到这个会话（默认所有活跃会话）")
+    bi.add_argument("--persona", default="", help="覆盖包里的人格 id")
+    bi.add_argument("--dry-run", action="store_true")
 
     pu = sub.add_parser("push", help="把 dsh-notes.jsonl 推送到 AstrBot 长期记忆")
     pu.add_argument("--file", default=str(DEFAULT_NOTE_FILE))
@@ -1134,7 +1483,16 @@ def main(argv: list[str]) -> int:
         if a.cmd == "status":
             return cmd_status(bot)
         if a.cmd == "pull":
-            return cmd_pull(bot, a.chats)
+            return cmd_pull(bot, a.chats, a.persona)
+        if a.cmd == "personas":
+            return cmd_personas(bot)
+        if a.cmd == "transfer":
+            ids = [i.strip() for i in a.ids.split(",") if i.strip()]
+            return cmd_transfer(bot, Path(a.file), ids, a.persona, a.session, a.to_persona, a.dry_run)
+        if a.cmd == "bundle-export":
+            return cmd_bundle_export(bot, a.persona, a.out, a.sanitize)
+        if a.cmd == "bundle-import":
+            return cmd_bundle_import(bot, Path(a.file), a.session, a.persona, a.dry_run)
         if a.cmd == "push":
             return cmd_push(bot, Path(a.file), a.dry_run, a.limit, a.session, a.persona)
         if a.cmd == "activity":

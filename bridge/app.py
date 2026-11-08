@@ -16,6 +16,7 @@ import io
 import json
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -156,6 +157,8 @@ def state() -> dict:
         "notes": [{"ts": n["ts"], "text": n["text"], "tags": n["tags"]} for n in notes[-6:]][::-1],
         "activity": rows,
         "activity_error": _acts_cache.get("error"),
+        "personas": persona_options(),
+        "sessions": target_sessions(),
         "workspace": str(ab.WORKSPACE),
         "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -169,6 +172,44 @@ def _personas() -> list:
         return json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
         return []
+
+
+def _local_memories() -> list:
+    """本地 memories.json 里的全量记忆（pull 时总是写全量）。"""
+    path = ab.EXPORT_DIR / "memories.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return []
+    return data.get("memories") or []
+
+
+def persona_options() -> list:
+    """给界面下拉框：每个人格多少条、覆盖哪些会话。"""
+    rows = ab.persona_stats(_local_memories())
+    names = {str(p.get("persona_id") or ""): p for p in _personas()}
+    for r in rows:
+        pid = r["persona_id"]
+        r["label"] = pid or "（无人格 / 全局）"
+        r["persona_name"] = (names.get(pid) or {}).get("persona_id") or pid
+    return rows
+
+
+def target_sessions() -> list:
+    """候选目标会话：之前同步过的会话 + 记忆里出现过的会话。"""
+    st = ab.load_state()
+    seen: list[str] = []
+    for t in st.get("targets") or []:
+        s = str(t.get("session") or "")
+        if s and s not in seen:
+            seen.append(s)
+    for m in _local_memories():
+        s = str(m.get("session_id") or "")
+        if s and s not in seen:
+            seen.append(s)
+    return [{"session": s, "label": ab.session_label(s)} for s in seen]
 
 
 # ------------------------------------------------------------------ 任务
@@ -198,6 +239,9 @@ TASKS = {
     "activity": "同步 DSH 会话（只推选中的）",
     "selftest": "端到端自检",
     "status": "查看状态",
+    "transfer": "传送选中的记忆",
+    "bundle-export": "导出人格包",
+    "bundle-import": "导入人格包",
 }
 
 
@@ -208,8 +252,9 @@ def _run_task(name: str, job: dict) -> None:
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
             print(f"[{_now()}] {TASKS.get(name, name)} …")
             bot = get_bot()
+            p = job.get("params") or {}
             if name == "pull":
-                rc = ab.cmd_pull(bot, 150)
+                rc = ab.cmd_pull(bot, 150, persona=str(p.get("persona") or ""))
             elif name == "push":
                 rc = ab.cmd_push(bot, ab.DEFAULT_NOTE_FILE, False, 200)
             elif name == "activity":
@@ -219,6 +264,22 @@ def _run_task(name: str, job: dict) -> None:
                 rc = ab.cmd_selftest(bot, "")
             elif name == "status":
                 rc = ab.cmd_status(bot)
+            elif name == "transfer":
+                rc = ab.cmd_transfer(bot, ab.EXPORT_DIR / "memories.json",
+                                     ids=p.get("ids") or None,
+                                     persona=str(p.get("persona") or ""),
+                                     session=str(p.get("session") or ""),
+                                     to_persona=str(p.get("to_persona") or ""),
+                                     dry_run=bool(job.get("dry")))
+            elif name == "bundle-export":
+                rc = ab.cmd_bundle_export(bot, str(p.get("persona") or ""),
+                                          str(p.get("out") or ""),
+                                          bool(p.get("sanitize")))
+            elif name == "bundle-import":
+                rc = ab.cmd_bundle_import(bot, Path(str(p.get("file") or "")),
+                                          str(p.get("session") or ""),
+                                          str(p.get("persona") or ""),
+                                          dry_run=bool(job.get("dry")))
             else:
                 rc = ab.cmd_pull(bot, 150)
                 rc = ab.cmd_push(bot, ab.DEFAULT_NOTE_FILE, False, 200) or rc
@@ -294,14 +355,16 @@ def rt_stop() -> dict:
         return {"ok": True, "stopped": True}
 
 
-def start_job(name: str, sessions: list | None = None, dry: bool = False) -> dict:
+def start_job(name: str, sessions: list | None = None, dry: bool = False,
+              params: dict | None = None) -> dict:
     global _job_seq
     with _job_lock:
         _job_seq += 1
         jid = str(_job_seq)
         job = {"id": jid, "task": name, "lines": [], "done": False, "rc": None,
                "started": datetime.now().strftime("%H:%M:%S"),
-               "sessions": list(sessions or []), "dry": bool(dry)}
+               "sessions": list(sessions or []), "dry": bool(dry),
+               "params": dict(params or {})}
         _jobs[jid] = job
     threading.Thread(target=_run_task, args=(name, job), daemon=True).start()
     return job
@@ -364,6 +427,27 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "lines": lines, "from": start, "total": total,
                         "done": job["done"], "rc": job["rc"]})
             return
+        if path == "/api/memories":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            persona = (q.get("persona") or [""])[0]
+            needle = (q.get("q") or [""])[0].strip().lower()
+            rows = _local_memories()
+            if persona:
+                rows = ab._filter_memories(rows, persona=persona)
+            if needle:
+                rows = [m for m in rows if needle in str(m.get("content") or "").lower()]
+            items = [{
+                "id": str(m.get("id") or ""),
+                "text": str(m.get("content") or ""),
+                "importance": m.get("importance"),
+                "persona": str(m.get("persona_id") or ""),
+                "session": str(m.get("session_id") or ""),
+                "label": ab.session_label(str(m.get("session_id") or "")),
+                "created_at": str(m.get("created_at") or ""),
+            } for m in rows]
+            self._json({"ok": True, "items": items, "total": len(items),
+                        "personas": persona_options(), "sessions": target_sessions()})
+            return
         if path == "/api/realtime":
             self._json(rt_status())
             return
@@ -394,8 +478,56 @@ class Handler(BaseHTTPRequestHandler):
             if name not in TASKS:
                 self._json({"ok": False, "error": f"unknown task {name}"}, 400)
                 return
-            job = start_job(name)
+            job = start_job(name, params={"persona": str(body.get("persona") or "")})
             self._json({"ok": True, "id": job["id"], "task": name})
+            return
+        if path == "/api/transfer":
+            ids = [str(i) for i in (body.get("ids") or []) if str(i)]
+            persona = ab._clean_text(body.get("persona") or "")
+            if not ids and not persona:
+                self._json({"ok": False, "error": "先勾几条记忆，或者选一个人格"}, 400)
+                return
+            job = start_job("transfer", dry=bool(body.get("dry")), params={
+                "ids": ids, "persona": persona,
+                "session": str(body.get("session") or ""),
+                "to_persona": str(body.get("to_persona") or ""),
+            })
+            self._json({"ok": True, "id": job["id"], "task": "transfer",
+                        "count": len(ids), "persona": persona})
+            return
+        if path == "/api/bundle":
+            action = str(body.get("action") or "export")
+            if action == "export":
+                job = start_job("bundle-export", params={
+                    "persona": ab._clean_text(body.get("persona") or ""),
+                    "out": str(body.get("out") or ""),
+                    "sanitize": bool(body.get("sanitize", True)),
+                })
+            elif action == "import":
+                f = str(body.get("file") or "")
+                if not f and body.get("content"):
+                    # 浏览器上传：把内容落到 bundles/import-<时间>.json
+                    try:
+                        obj = json.loads(str(body["content"]))
+                    except ValueError:
+                        self._json({"ok": False, "error": "包内容不是合法 JSON"}, 400)
+                        return
+                    name = str(obj.get("persona", {}).get("persona_id") or "import")
+                    safe = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", name)[:30] or "import"
+                    ab.BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+                    f = str(ab.BUNDLE_DIR / f"import-{safe}-{datetime.now():%Y%m%d-%H%M%S}.json")
+                    Path(f).write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                if not f:
+                    self._json({"ok": False, "error": "没给包文件路径"}, 400)
+                    return
+                job = start_job("bundle-import", dry=bool(body.get("dry")), params={
+                    "file": f, "session": str(body.get("session") or ""),
+                    "persona": ab._clean_text(body.get("persona") or ""),
+                })
+            else:
+                self._json({"ok": False, "error": f"unknown action {action}"}, 400)
+                return
+            self._json({"ok": True, "id": job["id"], "task": job["task"]})
             return
         if path == "/api/note":
             text = ab._clean_text(body.get("text") or "")

@@ -28,7 +28,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent          # memory/bridge
 MEM_ROOT = HERE.parent                          # memory
 WORKSPACE = MEM_ROOT.parent                     # 工作区
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 NAME = f"记忆互通-{VERSION}-源码"
 
 PY_FILES = [
@@ -316,6 +316,12 @@ def build(out_root: Path) -> Path:
             print(f"跳过（不存在）：{name}")
             continue
         shutil.copy2(src, dist / "bridge" / name)
+
+    # 打包前把「本机面板」的名字换成通用名：别人没有 AstrBotPanel，也不该看到它
+    for path in (dist / "bridge").glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "AstrBotPanel" in text:
+            path.write_text(text.replace("AstrBotPanel", "AstrBotPanel"), encoding="utf-8")
 
     shutil.copy2(MEM_ROOT / "ui" / "index.html", dist / "ui" / "index.html")
     shutil.copy2(HERE / "scan_package.py", dist / "tools" / "scan_package.py")

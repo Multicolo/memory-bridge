@@ -29,7 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent          # memory/bridge
 MEM_ROOT = HERE.parent                          # memory
 WORKSPACE = MEM_ROOT.parent                     # 工作区
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 NAME = f"记忆互通-{VERSION}"
 
 PY_FILES = ["astrbot_bridge.py", "realtime.py", "activity.py", "app.py", "setup.py"]
@@ -179,6 +179,12 @@ def build(out_root: Path, icon_source: Path | None) -> Path:
             subprocess.run(["attrib", "+r", str(dist)], check=False)
         except Exception:
             pass
+
+    # 打包前把「本机面板」的名字换成通用名：别人没有 AstrBotPanel，也不该看到它
+    for path in (dist / "memory" / "bridge").glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "AstrBotPanel" in text:
+            path.write_text(text.replace("AstrBotPanel", "AstrBotPanel"), encoding="utf-8")
 
     # 最后扫一遍：不该出现的个人信息
     leaked = []

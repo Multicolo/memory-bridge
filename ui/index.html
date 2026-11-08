@@ -119,6 +119,26 @@
   }
   #sesssync:disabled{opacity:.45;cursor:not-allowed}
   #acts .item .text{margin-top:7px}
+  #mlist{max-height:380px}
+  .grow{flex:1}
+  .persona-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  select{
+    border:1px solid var(--pink-200);border-radius:12px;padding:9px 12px;font-size:12.5px;
+    background:#fffafc;color:var(--ink);font-family:inherit;outline:none;cursor:pointer;max-width:100%;
+  }
+  select:focus{border-color:var(--pink-400);box-shadow:0 0 0 3px rgba(255,143,182,.16)}
+  #mq{flex:1;min-width:200px}
+  .mem{
+    display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line);border-radius:14px;
+    padding:11px 13px;background:#fffafc;cursor:pointer;transition:background .15s,border-color .15s;
+  }
+  .mem:hover{background:#fff4f9}
+  .mem.on{background:#fff0f6;border-color:var(--pink-300)}
+  .mem input[type=checkbox]{margin-top:3px;accent-color:var(--pink-500);flex:0 0 auto}
+  .mem .txt{font-size:12.5px;color:var(--ink-soft);line-height:1.65;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .mem .mmeta{font-size:11px;color:var(--ink-mute);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{background:var(--pink-100);color:#ad3d68;border-radius:999px;padding:1px 7px}
   .item{
     border:1px solid var(--line);border-radius:16px;padding:12px 14px;background:#fffafc;
   }
@@ -250,6 +270,33 @@
         <button class="btn tiny" id="sesssync">☁️ 同步选中的</button>
       </div>
       <div class="list" id="acts"></div>
+    </section>
+
+    <!-- 人格与记忆 -->
+    <section class="card span2">
+      <h2>🎭 人格与记忆传送</h2>
+      <p class="hint">按人格挑记忆：可以只把某个人格的记忆传过去，也可以勾几条单独传。默认写到所有活跃会话，召回时才捞得到。</p>
+      <div class="persona-row">
+        <select id="pselect"><option value="">全部人格</option></select>
+        <input type="text" id="mq" placeholder="搜索记忆内容，比如「作息」「B站」…">
+        <button class="btn tiny ghost" id="mreload">刷新</button>
+      </div>
+      <div class="row">
+        <span class="label" id="mcount">共 0 条</span>
+        <button class="btn tiny ghost" id="mall">全选</button>
+        <button class="btn tiny ghost" id="mnone">清空</button>
+        <span class="grow"></span>
+        <select id="tsess"><option value="">所有活跃会话</option></select>
+      </div>
+      <div class="list" id="mlist"></div>
+      <div class="row">
+        <button class="btn tiny" id="mtransfer">↗️ 传送勾选的记忆</button>
+        <button class="btn tiny" id="mwhole">传送这个人的全部</button>
+        <button class="btn tiny ghost" id="mbundle">📦 导出人格包</button>
+        <button class="btn tiny ghost" id="mimport">📥 导入人格包</button>
+        <input type="file" id="mfile" accept=".json" hidden>
+      </div>
+      <p class="hint">人格包 = 人格设定 + 它名下的记忆，可以搬到另一个 AstrBot；导入时写到下拉框选中的会话。</p>
     </section>
 
     <!-- 笔记历史 -->
@@ -423,6 +470,124 @@ async function syncSelected(){
   refresh();
 }
 
+/* ---------- 人格与记忆 ---------- */
+const MEM = {rows: [], selected: new Set(), loaded: false};
+
+function renderMem(){
+  const box = $("#mlist");
+  box.innerHTML = "";
+  $("#mcount").textContent = `共 ${MEM.rows.length} 条 · 已选 ${MEM.selected.size} 条`;
+  if (!MEM.rows.length){
+    box.innerHTML = '<div class="empty">没有匹配的记忆。换个关键词，或先点「拉取记忆」。</div>';
+    return;
+  }
+  for (const m of MEM.rows){
+    const d = document.createElement("label");
+    d.className = "mem" + (MEM.selected.has(m.id) ? " on" : "");
+    d.innerHTML = `<input type="checkbox">
+      <div style="flex:1;min-width:0">
+        <div class="txt"></div>
+        <div class="mmeta"></div>
+      </div>`;
+    d.querySelector(".txt").textContent = m.text || "";
+    const meta = d.querySelector(".mmeta");
+    for (const bit of [m.label, (m.importance != null ? "重要度 " + Number(m.importance).toFixed(2) : "")].filter(Boolean)){
+      const s = document.createElement("span");
+      s.className = "pill";
+      s.textContent = bit;
+      meta.appendChild(s);
+    }
+    const cb = d.querySelector("input");
+    cb.checked = MEM.selected.has(m.id);
+    cb.onchange = () => {
+      if (cb.checked) MEM.selected.add(m.id); else MEM.selected.delete(m.id);
+      d.classList.toggle("on", cb.checked);
+      renderMem();
+    };
+    box.appendChild(d);
+  }
+}
+
+function fillDropdown(sel, rows, fmt){
+  if (sel.options.length > 1) return;
+  for (const r of rows || []){
+    const o = document.createElement("option");
+    o.value = r.value;
+    o.textContent = fmt(r);
+    sel.appendChild(o);
+  }
+}
+
+let memTimer = null;
+async function loadMemories(){
+  const p = $("#pselect").value;
+  const q = $("#mq").value.trim();
+  try{
+    const r = await api(`/api/memories?persona=${encodeURIComponent(p)}&q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error(r.error || "读取失败");
+    MEM.rows = r.items || [];
+    MEM.selected.clear();
+    fillDropdown($("#pselect"), (r.personas || []).map(x => ({value: x.persona_id, label: x.label, count: x.count})),
+      x => `${x.label}（${x.count} 条）`);
+    fillDropdown($("#tsess"), (r.sessions || []).map(x => ({value: x.session, label: x.label})), x => x.label);
+    renderMem();
+  }catch(e){
+    $("#mlist").innerHTML = '<div class="empty">读不到记忆：' + e.message + '</div>';
+  }
+}
+
+async function startTask(url, body, label){
+  if (running) return;
+  setBusy(true);
+  clearLog();
+  logLine((label || "启动") + " …", "dim");
+  try{
+    const r = await api(url, body);
+    if (!r.ok) throw new Error(r.error || "启动失败");
+    await poll(r.id, 0);
+  }catch(e){
+    logLine("启动失败：" + e.message, "err");
+    setBusy(false);
+  }
+  setBusy(false);
+  loadMemories();
+}
+
+async function transferSelected(){
+  const ids = [...MEM.selected];
+  if (!ids.length){ toast("先勾几条记忆"); return; }
+  await startTask("/api/transfer", {ids, session: $("#tsess").value}, `传送 ${ids.length} 条记忆`);
+}
+
+async function transferWhole(){
+  const persona = $("#pselect").value;
+  if (!persona){ toast("先在左边选一个人格（全部人格太大了）"); return; }
+  await startTask("/api/transfer", {persona, session: $("#tsess").value}, `传送人格「${persona}」的全部记忆`);
+}
+
+async function exportBundle(){
+  const persona = $("#pselect").value;
+  if (!persona){ toast("先选一个人格再导出"); return; }
+  await startTask("/api/bundle", {action: "export", persona, sanitize: true}, `导出人格包「${persona}」`);
+}
+
+$("#pselect").addEventListener("change", loadMemories);
+$("#mq").addEventListener("input", () => { clearTimeout(memTimer); memTimer = setTimeout(loadMemories, 350); });
+$("#mreload").onclick = loadMemories;
+$("#mall").onclick = () => { MEM.rows.forEach(m => MEM.selected.add(m.id)); renderMem(); };
+$("#mnone").onclick = () => { MEM.selected.clear(); renderMem(); };
+$("#mtransfer").onclick = transferSelected;
+$("#mwhole").onclick = transferWhole;
+$("#mbundle").onclick = exportBundle;
+$("#mimport").onclick = () => $("#mfile").click();
+$("#mfile").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const text = await f.text();
+  e.target.value = "";
+  await startTask("/api/bundle", {action: "import", content: text, session: $("#tsess").value}, "导入人格包");
+};
+
 async function refresh(){
   try{
     const s = await api("/api/state");
@@ -475,6 +640,7 @@ async function poll(id, from){
   }
   setBusy(false);
   refresh();
+  loadMemories();
 }
 
 async function run(task){
@@ -530,6 +696,7 @@ $("#stop").addEventListener("click", async () => {
 refresh();
 setInterval(refresh, 30000);
 loadSessions();
+loadMemories();
 $("#ws").onchange = (e) => loadSessions(e.target.value);
 $("#sessreload").onclick = () => loadSessions(SESS.workspace);
 $("#sessall").onclick = () => { SESS.rows.forEach(r => SESS.selected.add(r.key)); renderSessions(); };

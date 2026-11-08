@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+**人格与挑选传送**
+
+- 记忆列表按 `persona_id` 分组：界面里选人格 → 只看到这个人的记忆，搜索、全选、勾选
+- 选择性传送：勾中的记忆（或整个人的记忆）写到指定会话 / 所有活跃会话，`--dry-run` 先演练
+- `pull --persona`：只拉某人格的记忆与相关对话（本地 `memories.json` 仍保留全量）
+- 人格包：`bundle-export --persona --sanitize` / `bundle-import --file --session`，格式 `memory-bridge.persona` v1
+- `--sanitize` 抹掉 QQ 号、IP、邮箱、API key，包可以安全分享
+- 会话挑选：界面里选工作区、勾最近会话，只回传选中的
+
+**修复**
+
+- 导出里没有 `id` 只有 `original_id`，导致 `transfer` 报“没有符合条件的记忆可传”
+- 旧版 realtime 进程会用无 id 的导出覆盖 `memories.json`（现已改为全量 + id 映射）
+- `state.json` 不再保存 chat API key（移到 `%LOCALAPPDATA%\MemoryBridge`）
+- 打包脚本把本机面板名与示例里的 QQ 号替换掉，`scan_package.py` 两个包均“干净”
+
 ## 1.0.0
 
 第一个公开版本。

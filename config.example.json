@@ -1,5 +1,5 @@
 {
-  "_note": "复制成 bridge/config.json 再填；也可以直接跑 配置向导.cmd。",
+  "_note": "复制成 bridge/config.json 再填，或直接跑 配置向导.cmd。",
   "base": "http://127.0.0.1:6185",
   "panel": "http://127.0.0.1:8899",
   "user": "",

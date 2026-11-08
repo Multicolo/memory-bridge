@@ -13,6 +13,7 @@ DSH 这边做过的事，也能回到 bot 的记忆里。不用复制粘贴，�
   `memory/astrbot/DIGEST.md` 等文件，DSH 会话开始读一下就"记得"了
 - **推** — 你在界面里记的一句话（`memory/dsh-notes.jsonl`）会推到云端，落进 bot 的长期记忆
 - **挑着回传** — 把选中的 DSH 会话摘要成「【DSH 活动】…」记忆：先选工作区，再勾那几条，只有勾中的会发
+- **按人格挑记忆** — bot 里有多个人格时，可以只看某个人的记忆，勾几条传几条；也能把一个人格的记忆打包带走（`bundle-export` / `bundle-import`）
 - **实时** — 常驻后每 20 秒拉一次；本地笔记一改就推，DSH 和 bot 读到的是同一批文件
 
 ## 下载
@@ -21,9 +22,9 @@ DSH 这边做过的事，也能回到 bot 的记忆里。不用复制粘贴，�
 
 | 文件 | 适合 | 大小 |
 | --- | --- | --- |
-| `memory-bridge-1.0.0-windows-onefile.zip` | 单文件 exe，解压双击就能用 | ~30 MB |
-| `memory-bridge-1.0.0-windows-folder.zip` | 文件夹版，启动快，整个文件夹一起拷 | ~31 MB |
-| `memory-bridge-1.0.0-source.zip` | 想看代码 / 自己编译 | ~230 KB |
+| `memory-bridge-1.1.0-windows-onefile.zip` | 单文件 exe，解压双击就能用 | ~30 MB |
+| `memory-bridge-1.1.0-windows-folder.zip` | 文件夹版，启动快，整个文件夹一起拷 | ~31 MB |
+| `memory-bridge-1.1.0-source.zip` | 想看代码 / 自己编译 | ~240 KB |
 
 要求：Windows 10/11 64 位。
 
@@ -57,6 +58,24 @@ python bridge/astrbot_bridge.py push                 # 推笔记
 python bridge/astrbot_bridge.py status               # 看状态
 python bridge/realtime.py --once                     # 实时同步跑一轮
 ```
+
+## 人格与挑选传送
+
+界面上是「人格与记忆传送」这张卡：选人格 → 勾记忆（可搜索）→ 选目标会话 → 传送。
+命令行等价：
+
+```bash
+python bridge/astrbot_bridge.py personas                     # 有哪些人格、各多少条
+python bridge/astrbot_bridge.py pull --persona 默认人格       # 只拉这个人的记忆
+python bridge/astrbot_bridge.py transfer --persona 默认人格    # 把这个人的记忆传到所有活跃会话
+python bridge/astrbot_bridge.py transfer --ids 4,5 --session <会话> --dry-run
+python bridge/astrbot_bridge.py bundle-export --persona 默认人格 --sanitize
+python bridge/astrbot_bridge.py bundle-import --file 包.json --session <会话>
+```
+
+- 本地 `memories.json` 始终是全量，`--persona` 只影响给人看的 `MEMORY.md` / `DIGEST.md` 和对话拉取。
+- 传送 = 写到目标会话，每个会话一份；LivingMemory 的去重键是 `(内容, 会话, 人格)`，重复传不会翻倍。
+- 人格包是 `memory-bridge.persona` v1（人格设定 + 去重后的记忆）；`--sanitize` 会把 QQ 号、IP、邮箱、key 换成占位符，适合分享。
 
 ## 工作原理
 

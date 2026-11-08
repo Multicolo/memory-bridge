@@ -112,50 +112,146 @@ def tray_image(icon_path: Path):
 
 # ------------------------------------------------------------------ 主流程
 
+def _rounded(cv, x1: float, y1: float, x2: float, y2: float, r: float,
+             fill: str, outline: str = "") -> int:
+    """圆角矩形（tkinter 没有原生的，用多边形 + smooth 近似）。"""
+    import math
+
+    pts: list[float] = []
+    for cx, cy, a0 in ((x2 - r, y1 + r, -90), (x2 - r, y2 - r, 0),
+                       (x1 + r, y2 - r, 90), (x1 + r, y1 + r, 180)):
+        for i in range(13):
+            a = math.radians(a0 + i * 7.5)
+            pts.extend((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return cv.create_polygon(pts, fill=fill, outline=outline or fill, smooth=True)
+
+
+
 def first_run_dialog(cfg_path: Path, icon: Path | None) -> bool:
     """第一次运行时的设置窗。返回 True 表示配置已经存好。"""
     import tkinter as tk
-    from tkinter import messagebox, ttk
+    from tkinter import messagebox
 
     saved: dict = {}
+    bg = "#ffffff"
+    ink = "#33232d"
+    muted = "#a08d97"
+    line = "#f0dde6"
+    pink = "#ff5f92"
+    deep = "#d81b60"
+    soft = "#ffffff"
+    font = "Microsoft YaHei UI"
+
+    try:  # 高 DPI 屏上别糊
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:  # noqa: BLE001
+        pass
+
     root = tk.Tk()
     root.title("记忆互通 · 第一次设置")
     root.resizable(False, False)
-    root.configure(bg="#fdf1f4")
+    root.configure(bg=bg)
     if icon and icon.exists():
         try:
             root.iconbitmap(str(icon))
         except tk.TclError:
             pass
 
-    pad = {"padx": 14, "pady": 6}
-    tk.Label(root, text="跟云上的 AstrBot 连一下", bg="#fdf1f4",
-             font=("Microsoft YaHei UI", 11, "bold")).grid(row=0, column=0, columnspan=2, pady=(16, 4))
-    tk.Label(root, text="填你本机能打开的那个面板地址。\n在服务器上的话，先把端口映射到本机再来填。",
-             bg="#fdf1f4", fg="#8a6a74", font=("Microsoft YaHei UI", 9)).grid(
-        row=1, column=0, columnspan=2, pady=(0, 10))
+    w, h = 480, 596
+    try:
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.geometry(f"{w}x{h}+{(sw - w) // 2}+{max(0, (sh - h) // 2 - 40)}")
+    except Exception:  # noqa: BLE001
+        root.geometry(f"{w}x{h}")
 
-    fields = [("面板地址", "base", ""),
-              ("登录账号", "user", ""),
-              ("登录密码", "password", "")]
-    entries = {}
-    for i, (label, key, default) in enumerate(fields, start=2):
-        tk.Label(root, text=label, bg="#fdf1f4", font=("Microsoft YaHei UI", 10)).grid(
-            row=i, column=0, sticky="e", **pad)
-        ent = ttk.Entry(root, width=32, show="*" if key == "password" else "")
-        ent.insert(0, default)
-        ent.grid(row=i, column=1, sticky="w", **pad)
+    cv = tk.Canvas(root, width=w, height=h, bg=bg, highlightthickness=0)
+    cv.pack(fill="both", expand=True)
+
+    # ── 头部：小鱼 logo + 标题（留白，不画色块）
+    cv.create_oval(48, 38, 96, 86, fill="#ffeaf1", outline="")
+    cv.create_oval(60, 54, 84, 74, fill=pink, outline="")
+    cv.create_polygon(82, 56, 92, 48, 92, 80, 82, 72, fill=pink, outline="")
+    cv.create_oval(65, 58, 70, 63, fill="white", outline="")
+
+    cv.create_text(110, 50, text="记忆互通", anchor="w", font=(font, 19, "bold"), fill=ink)
+    cv.create_text(111, 76, text="让云端的 AstrBot 记住这台电脑", anchor="w",
+                   font=(font, 9), fill=muted)
+    cv.create_line(48, 110, w - 48, 110, fill=line)
+
+    entries: dict[str, tk.Entry] = {}
+    boxes: dict[str, int] = {}
+
+    def field(y: float, label: str, key: str, hint: str, *, secret: bool = False) -> tk.Entry:
+        cv.create_text(50, y, text=label, anchor="w", font=(font, 9), fill="#6f5a64")
+        boxes[key] = _rounded(cv, 48, y + 14, w - 48, y + 58, 12, soft, "#f3dee8")
+        ent = tk.Entry(root, font=(font, 11), bg=soft, fg=ink, relief="flat",
+                       highlightthickness=0, insertbackground=pink,
+                       show="●" if secret else "")
+        cv.create_window(62, y + 36, window=ent, anchor="w", width=w - 168, height=34)
+        ent.bind("<FocusIn>", lambda _e, k=key: cv.itemconfig(boxes[k], outline=pink))
+        ent.bind("<FocusOut>", lambda _e, k=key: cv.itemconfig(boxes[k], outline="#f3dee8"))
+        cv.create_text(50, y + 70, text=hint, anchor="w", font=(font, 8), fill="#bca7b0")
         entries[key] = ent
+        return ent
 
-    status = tk.Label(root, text="", bg="#fdf1f4", fg="#8a6a74", font=("Microsoft YaHei UI", 9))
-    status.grid(row=6, column=0, columnspan=2, pady=(2, 0))
+    field(146, "面板地址", "base", "本机能打开的那个面板地址")
+    field(240, "登录账号", "user", "AstrBot 面板的登录名")
+    field(334, "登录密码", "password", "只写进本机 config.json，不会上传", secret=True)
+
+    def toggle_password(_event=None) -> None:
+        ent = entries["password"]
+        showing = bool(ent.cget("show"))
+        ent.config(show="" if showing else "●")
+        eye.itemconfig(eye_text, text="隐藏" if showing else "显示")
+
+    eye = cv.create_text(w - 70, 370, text="显示", anchor="e", font=(font, 8), fill=deep)
+    eye_text = eye
+    eye_tag = cv.create_rectangle(w - 96, 358, w - 66, 382, fill="", outline="")
+    cv.tag_bind(eye_tag, "<Button-1>", toggle_password)
+    cv.tag_bind(eye, "<Button-1>", toggle_password)
+    for tag in (eye_tag, eye):
+        cv.tag_bind(tag, "<Enter>", lambda _e: cv.config(cursor="hand2"))
+        cv.tag_bind(tag, "<Leave>", lambda _e: cv.config(cursor=""))
+
+    # ── 状态
+    dot = cv.create_oval(48, 424, 56, 432, fill="#e8cfd9", outline="")
+    status = cv.create_text(64, 428, text="填好点下面连一次。", anchor="w",
+                            font=(font, 9), fill=muted)
+
+    def set_status(text: str, color: str, dot_color: str) -> None:
+        cv.itemconfig(status, text=text[:70], fill=color)
+        cv.itemconfig(dot, fill=dot_color)
+        root.update_idletasks()
+
+    # ── 按钮（圆角 Label，不用默认按钮的方框）
+    def pill(x: float, y: float, width: float, text: str, cmd, *, primary: bool) -> tk.Label:
+        fill = pink if primary else "#fff3f8"
+        fg = "white" if primary else deep
+        box = _rounded(cv, x, y, x + width, y + 42, 14, fill,
+                       "" if primary else "#ffd4e3")
+        lab = tk.Label(root, text=text, bg=fill, fg=fg,
+                       font=(font, 10, "bold" if primary else "normal"),
+                       cursor="hand2")
+        cv.create_window(x + width / 2, y + 21, window=lab, width=int(width - 8), height=34)
+        hover = "#ff4d86" if primary else "#ffe4ee"
+
+        def paint(color: str) -> None:
+            cv.itemconfig(box, fill=color)
+            lab.config(bg=color)
+
+        lab.bind("<Enter>", lambda _e: paint(hover))
+        lab.bind("<Leave>", lambda _e: paint(fill))
+        lab.bind("<Button-1>", lambda _e: cmd())
+        return lab
 
     def do_save(verify: bool = True) -> None:
         base = entries["base"].get().strip() or "http://127.0.0.1:6185"
         user = entries["user"].get().strip()
         password = entries["password"].get()
         if not user or not password:
-            status.config(text="账号和密码都得填。", fg="#c0392b")
+            set_status("账号和密码都得填。", "#c0392b", "#e74c3c")
             return
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cfg = {
@@ -173,37 +269,44 @@ def first_run_dialog(cfg_path: Path, icon: Path | None) -> bool:
             root.destroy()
             return
 
-        status.config(text="正在测试连接…", fg="#8a6a74")
-        root.update_idletasks()
+        set_status("正在连…隧道没开的话要等十几秒", muted, "#f3b6c8")
+        save_btn.config(text="连接中…")
 
         def work() -> None:
             try:
                 import astrbot_bridge as ab
                 st = ab.AstrBot(ab.load_config()).stats()
-                text = f"连上了：{st.get('total_memories', '?')} 条记忆，索引 {st.get('index_state', '?')}"
-                root.after(0, lambda: status.config(text=text, fg="#1e7a5a"))
+                total = st.get("total_memories", "?")
+                index = st.get("index_state", "?")
                 saved["ok"] = True
-                root.after(500, root.destroy)
+                root.after(0, lambda: set_status(f"连上了：{total} 条记忆 · 索引 {index}",
+                                                 "#1e7a5a", "#2ecc71"))
+                root.after(700, root.destroy)
             except Exception as error:  # noqa: BLE001
                 msg = f"{type(error).__name__}: {error}"
 
                 def fail() -> None:
-                    status.config(text="连不上：" + msg[:60], fg="#c0392b")
+                    save_btn.config(text="保存并测试")
+                    set_status("连不上，检查地址 / 账号 / 隧道", "#c0392b", "#e74c3c")
                     messagebox.showwarning("连不上", "地址或账号可能不对，也可能隧道没开。\n\n" + msg)
 
                 root.after(0, fail)
 
         threading.Thread(target=work, daemon=True).start()
 
-    btns = tk.Frame(root, bg="#fdf1f4")
-    btns.grid(row=5, column=0, columnspan=2, pady=(12, 6))
-    ttk.Button(btns, text="保存并测试", command=lambda: do_save(True)).pack(side="left", padx=6)
-    ttk.Button(btns, text="跳过测试", command=lambda: do_save(False)).pack(side="left", padx=6)
-    ttk.Button(btns, text="退出", command=root.destroy).pack(side="left", padx=6)
+    save_btn = pill(48, 452, 262, "保存并测试", lambda: do_save(True), primary=True)
+    pill(324, 452, 108, "先跳过", lambda: do_save(False), primary=False)
+    cv.create_text(w // 2, 508, text="直接关掉也行，之后在托盘菜单里改",
+                   font=(font, 8), fill="#c4b0b9")
 
+    cv.create_line(48, 536, w - 48, 536, fill="#f7ebf0")
+    cv.create_text(w // 2, 562, text="凭据只写在本机 config.json，不会上传；这个窗口只出现一次。",
+                   font=(font, 8), fill="#c0a9b3")
+
+    root.bind("<Return>", lambda _e: do_save(True))
+    root.after(120, lambda: entries["base"].focus_force())
     root.mainloop()
     return bool(saved.get("ok"))
-
 
 def run_tray(port: int, mem: Path, log_path: Path, icon_path: Path) -> int:
     """右下角托盘。服务已经在后台线程里跑着了。"""

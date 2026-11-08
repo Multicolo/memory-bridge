@@ -282,6 +282,8 @@ class AstrBot:
         return []
 
     def panel(self, path: str, method: str = "GET", body: dict | None = None, timeout: int = 90):
+        if not str(self.cfg.get("panel") or "").strip():
+            raise ApiError("没有配置面板地址（对话/服务器命令需要它，exe 里可在托盘菜单设置）")
         url = self.cfg["panel"].rstrip("/") + path
         last = None
         for attempt in range(4):
@@ -820,7 +822,10 @@ def cmd_pull(bot: AstrBot, chats: int, persona: str = "") -> int:
               f"本地 memories.json 仍保留全量，方便之后再挑别的）")
     print(f"  本地全量记忆：{len(all_memories)} 条")
     if chat_err:
-        print(f"  ! 对话拉取失败：{chat_err}")
+        if "没有配置面板地址" in str(chat_err):
+            print("  · 未配置面板地址，跳过对话（只拉长期记忆与人设）")
+        else:
+            print(f"  ! 对话拉取失败：{chat_err}")
     return 0
 
 

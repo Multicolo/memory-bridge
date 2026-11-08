@@ -29,7 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent          # memory/bridge
 MEM_ROOT = HERE.parent                          # memory
 WORKSPACE = MEM_ROOT.parent                     # 工作区
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 NAME = f"记忆互通-{VERSION}"
 
 PY_FILES = ["astrbot_bridge.py", "realtime.py", "activity.py", "app.py", "setup.py"]

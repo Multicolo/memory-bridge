@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆桥 · AstrBot ↔ DSH</title>
+<style>
+  :root{
+    --pink-50:#fff7fa; --pink-100:#ffeaf2; --pink-200:#ffd6e4; --pink-300:#ffb8ce;
+    --pink-400:#ff8fb6; --pink-500:#ff6f9c; --pink-600:#ef4f83; --pink-700:#c2185b;
+    --ink:#462b36; --ink-soft:#7d5c6b; --ink-mute:#a98d99;
+    --card:#ffffff; --line:#ffe1eb; --shadow:0 10px 30px rgba(214,51,108,.10);
+    --shadow-sm:0 4px 14px rgba(214,51,108,.08);
+    --ok:#2f9e73; --warn:#d1495b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1100px 500px at 12% -8%, #ffe3ee 0%, rgba(255,227,238,0) 60%),
+      radial-gradient(900px 460px at 100% 0%, #ffd9e7 0%, rgba(255,217,231,0) 55%),
+      linear-gradient(180deg,#fff7fa 0%,#fff3f7 40%,#fff9fb 100%);
+    min-height:100vh;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:28px 22px 60px}
+
+  /* ---------- 头部 ---------- */
+  header{
+    position:relative;overflow:hidden;border-radius:28px;padding:30px 32px;
+    background:linear-gradient(135deg,#ffe0ec 0%,#ffc3d9 48%,#ffa8c6 100%);
+    box-shadow:0 18px 40px rgba(226,72,124,.18);
+    border:1px solid #ffd0e0;
+  }
+  header::before,header::after{
+    content:"";position:absolute;border-radius:50%;pointer-events:none;
+    background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.85),rgba(255,255,255,0) 70%);
+  }
+  header::before{width:260px;height:260px;right:-70px;top:-110px}
+  header::after{width:180px;height:180px;right:90px;bottom:-120px;opacity:.7}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{
+    width:52px;height:52px;border-radius:18px;flex:0 0 auto;
+    background:linear-gradient(140deg,#ff7fae,#ef4f83);
+    box-shadow:0 8px 18px rgba(239,79,131,.35), inset 0 1px 0 rgba(255,255,255,.6);
+    display:grid;place-items:center;font-size:25px;
+  }
+  h1{margin:0;font-size:26px;letter-spacing:.5px;color:#5b1836}
+  .sub{margin:6px 0 0;color:#8a3b5c;font-size:13.5px}
+  .chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px;position:relative;z-index:1}
+  .chip{
+    display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.72);
+    border:1px solid rgba(255,255,255,.9);border-radius:999px;padding:7px 13px;font-size:12.5px;
+    color:#6d2745;backdrop-filter:blur(6px);box-shadow:0 3px 10px rgba(197,58,104,.10);
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(47,158,115,.16)}
+  .dot.off{background:var(--warn);box-shadow:0 0 0 3px rgba(209,73,91,.16)}
+
+  /* ---------- 栅格 ---------- */
+  .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;margin-top:20px}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:22px;
+    padding:22px;box-shadow:var(--shadow-sm);
+  }
+  .card h2{margin:0 0 4px;font-size:16px;color:#61243d;display:flex;align-items:center;gap:8px}
+  .card .hint{margin:0 0 16px;font-size:12.5px;color:var(--ink-mute)}
+  .span2{grid-column:1 / -1}
+
+  /* ---------- 按钮 ---------- */
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .btn{
+    appearance:none;border:1px solid var(--pink-200);background:#fff;color:#7a2b4c;
+    border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:transform .12s ease, box-shadow .18s ease, background .18s ease;
+    font-family:inherit;
+  }
+  .btn:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(239,79,131,.16);background:#fff8fb}
+  .btn:active{transform:translateY(0)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+  .btn.primary{
+    grid-column:1 / -1;background:linear-gradient(135deg,#ff85b0,#ef4f83);color:#fff;
+    border:none;box-shadow:0 10px 22px rgba(239,79,131,.32);font-size:15px;padding:14px;
+  }
+  .btn.primary:hover{background:linear-gradient(135deg,#ff7aa8,#e8457a)}
+  .btn.ghost{background:transparent;border-style:dashed;color:#8d5a70}
+  .btn.tiny{padding:8px 12px;font-size:12.5px;border-radius:11px}
+
+  /* ---------- 表单 ---------- */
+  textarea{
+    width:100%;min-height:88px;resize:vertical;border:1px solid var(--pink-200);
+    border-radius:16px;padding:13px 15px;font-size:14px;line-height:1.6;color:var(--ink);
+    background:#fffafc;outline:none;font-family:inherit;transition:border .15s, box-shadow .15s;
+  }
+  textarea:focus{border-color:var(--pink-400);box-shadow:0 0 0 4px rgba(255,143,182,.18);background:#fff}
+  .row{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+  input[type=text]{
+    flex:1;min-width:140px;border:1px solid var(--pink-200);border-radius:12px;padding:10px 12px;
+    font-size:13px;background:#fffafc;outline:none;font-family:inherit;color:var(--ink);
+  }
+  input[type=text]:focus{border-color:var(--pink-400);box-shadow:0 0 0 3px rgba(255,143,182,.16)}
+  input[type=range]{accent-color:var(--pink-500);flex:0 0 130px}
+  .label{font-size:12.5px;color:var(--ink-mute)}
+
+  /* ---------- 列表 ---------- */
+  .list{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto;padding-right:4px}
+  #acts{max-height:430px}
+  .item.sess{display:flex;gap:10px;align-items:center;cursor:pointer}
+  .item.sess:hover{border-color:var(--pink-300);background:#fff}
+  .item.sess .sessbox{width:16px;height:16px;accent-color:var(--pink-500);flex:0 0 auto}
+  .item.sess .sessmain{flex:1;min-width:0}
+  .item.sess .title{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item.sess .top{align-items:center}
+  select#ws{
+    border:1px solid var(--pink-200);border-radius:12px;padding:9px 12px;font-size:13px;
+    background:#fffafc;color:var(--ink);font-family:inherit;outline:none;
+  }
+  #sesssync:disabled{opacity:.45;cursor:not-allowed}
+  #acts .item .text{margin-top:7px}
+  .item{
+    border:1px solid var(--line);border-radius:16px;padding:12px 14px;background:#fffafc;
+  }
+  .item .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+  .item .title{font-size:13.5px;font-weight:600;color:#6a2741}
+  .item .meta{font-size:11.5px;color:var(--ink-mute);white-space:nowrap}
+  .item .text{font-size:12.5px;color:var(--ink-soft);line-height:1.65;margin-top:6px}
+  .tag{
+    display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:999px;
+    background:var(--pink-100);color:#ad3d68;margin-left:6px;vertical-align:middle;
+  }
+  .tag.ok{background:#e8f7ef;color:#237a55}
+  .tag.new{background:#ffe9f1;color:#c2185b}
+  .empty{font-size:12.5px;color:var(--ink-mute);padding:14px;text-align:center;border:1px dashed var(--pink-200);border-radius:14px}
+
+  /* ---------- 控制台 ---------- */
+  .console{
+    background:linear-gradient(180deg,#3c1f2c,#331a25);border-radius:18px;padding:16px 18px;
+    font-family:"Cascadia Mono",Consolas,"SFMono-Regular",monospace;font-size:12.5px;line-height:1.7;
+    color:#ffd9e6;height:230px;overflow:auto;border:1px solid #52283a;
+    box-shadow:inset 0 2px 12px rgba(0,0,0,.25);white-space:pre-wrap;word-break:break-word;
+  }
+  .console .dim{color:#b98a9c}
+  .console .err{color:#ff9db4}
+  .console::-webkit-scrollbar{width:8px}
+  .console::-webkit-scrollbar-thumb{background:#6a3549;border-radius:8px}
+
+  /* ---------- 说明 ---------- */
+  .help p{font-size:13px;line-height:1.8;color:var(--ink-soft);margin:8px 0}
+  .help b{color:#7a2b4c}
+  .help code{
+    background:var(--pink-100);color:#a32c5b;border-radius:6px;padding:1px 6px;
+    font-family:Consolas,monospace;font-size:12px;
+  }
+  .help ol{margin:8px 0 0 18px;padding:0;font-size:13px;line-height:1.9;color:var(--ink-soft)}
+  .flow{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff8fb;border:1px dashed var(--pink-200);
+    border-radius:14px;padding:12px 14px;font-size:12.5px;color:#8d5a70;margin:10px 0 4px;
+  }
+  .flow .node{background:#fff;border:1px solid var(--pink-200);border-radius:10px;padding:5px 10px;color:#7a2b4c;font-weight:600}
+  footer{margin-top:26px;text-align:center;font-size:11.5px;color:#c49aab}
+.linkbtn{background:none;border:none;color:#c49aab;text-decoration:underline;cursor:pointer;font-size:11.5px;margin-left:8px;padding:0;font-family:inherit}
+.linkbtn:hover{color:#e0637f}
+  .toast{
+    position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+    background:#5b1836;color:#ffe7f0;padding:11px 20px;border-radius:999px;font-size:13px;
+    opacity:0;pointer-events:none;transition:all .25s ease;box-shadow:0 12px 30px rgba(91,24,54,.3);z-index:9;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="logo">🌸</div>
+      <div>
+        <h1>记忆桥</h1>
+        <p class="sub">AstrBot 云端长期记忆 ↔ 这台电脑上的 DSH 工作区</p>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip"><span id="dot" class="dot off"></span><span id="online">连接中…</span></span>
+      <span class="chip">🧠 长期记忆 <b id="c-mem">–</b> 条</span>
+      <span class="chip">💬 最近对话 <b id="c-msg">–</b> 条</span>
+      <span class="chip">🎭 人设 <b id="c-per">–</b> 个</span>
+      <span class="chip">📝 本地笔记 <b id="c-note">–</b> 条</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- 操作 -->
+    <section class="card">
+      <h2>⚡ 一键操作</h2>
+      <p class="hint">一键同步 = 拉取 bot 的记忆 + 推送你的笔记；DSH 会话在下面单独挑着同步。</p>
+      <div class="actions">
+        <button class="btn primary" data-task="sync">✨ 一键同步</button>
+        <button class="btn" data-task="pull" title="把 bot 的长期记忆、最近对话、人设拉到 memory/astrbot/，DSH 会话就能读到">⬇️ 拉取记忆</button>
+        <button class="btn" data-task="push">⬆️ 推送笔记</button>
+        <button class="btn" id="gotosess" title="一次只推你勾中的那几条会话，不会整个工作区全推">🕘 同步 DSH 会话（先勾选）</button>
+        <button class="btn" data-task="selftest">🔍 端到端自检</button>
+        <button class="btn ghost" data-task="status">📊 查看状态</button>
+      </div>
+    </section>
+
+    <!-- 实时 -->
+    <section class="card">
+      <h2>🔁 实时同步</h2>
+      <p class="hint">常驻着：每隔几十秒拉一次云端记忆，本地笔记一有变化就推回去。DSH 里所有会话读到的都是最新的。</p>
+      <div class="row" style="align-items:center; gap:10px; flex-wrap:wrap;">
+        <span class="dot off" id="rtdot"></span>
+        <b id="rttext">未开启</b>
+        <button class="btn tiny" id="rtstart">▶ 开启</button>
+        <button class="btn tiny ghost" id="rtstop" disabled>⏹ 停止</button>
+      </div>
+      <p class="hint" id="rtmeta" style="margin-bottom:0;"></p>
+    </section>
+
+    <!-- 记一条 -->
+    <section class="card">
+      <h2>✍️ 记一条</h2>
+      <p class="hint">值得长期记住的事实：偏好、决定、账号、环境、约定。一条只说一件事。</p>
+      <textarea id="note" placeholder="例如：我周六上午有课，别在早上八点前叫我；她喜欢被我夸「聪明」；服务器在杭州。" rows="3"></textarea>
+      <div class="row">
+        <input type="text" id="tags" placeholder="标签，逗号分隔（可留空）">
+        <span class="label">重要度 <b id="impv">0.7</b></span>
+        <input type="range" id="imp" min="0.1" max="1" step="0.05" value="0.7">
+      </div>
+      <div class="row">
+        <button class="btn tiny" id="save">💾 保存并推送</button>
+        <button class="btn tiny ghost" id="saveonly">只保存</button>
+      </div>
+    </section>
+
+    <!-- 会话同步 -->
+    <section class="card span2">
+      <h2>🕘 同步 DSH 会话</h2>
+      <p class="hint">挑要同步的会话，只推勾中的那几条——不会把整个工作区一股脑灌过去。</p>
+      <div class="row">
+        <span class="label">工作区</span>
+        <select id="ws" style="flex:1;min-width:220px"></select>
+        <button class="btn tiny ghost" id="sessreload">↻ 刷新列表</button>
+      </div>
+      <div class="row">
+        <button class="btn tiny ghost" id="sessall">全选</button>
+        <button class="btn tiny ghost" id="sessnone">全不选</button>
+        <span class="label" id="sesscount">已选 0 条</span>
+        <button class="btn tiny" id="sesssync">☁️ 同步选中的</button>
+      </div>
+      <div class="list" id="acts"></div>
+    </section>
+
+    <!-- 笔记历史 -->
+    <section class="card">
+      <h2>📝 最近的笔记</h2>
+      <p class="hint">存在 memory/dsh-notes.jsonl，推送后 bot 会按会话各记一份。</p>
+      <div class="list" id="notes"></div>
+    </section>
+
+    <!-- 日志 -->
+    <section class="card">
+      <h2>🖥️ 运行日志</h2>
+      <p class="hint">每次操作的实际输出。</p>
+      <div class="console" id="log"><span class="dim">等待操作…</span></div>
+    </section>
+
+    <!-- 说明 -->
+    <section class="card span2 help">
+      <h2>📖 互通说明</h2>
+      <div class="flow">
+        <span class="node">AstrBot 长期记忆</span> ⇄
+        <span class="node">LivingMemory 官方 import/export</span> ⇄
+        <span class="node">memory/ 目录</span> ⇄
+        <span class="node">DSH 会话笔记 / 行为摘要</span>
+      </div>
+      <p><b>记忆怎么走：</b>bot 在 QQ 里聊出来的长期记忆，用官方导出接口拉到 <code>memory/astrbot/</code>；DSH 这边的笔记存进 <code>memory/dsh-notes.jsonl</code>，再用官方导入接口写回 bot，并按每个会话各存一份——因为召回时按「会话 + 人设」精确过滤。</p>
+      <p><b>行为怎么回传：</b>读取本机 <code>~/.dsh/sessions/</code> 下这个工作区的会话记录（zstd 压缩的 jsonl），提炼成「用户让 DSH 做了什么 → 结果 → 涉及哪些文件」的一段话，作为一条记忆推给 bot；同一条会话内容变了才会重推，旧的那条会被替换。</p>
+      <p><b>DSH 侧怎么用：</b>会话开始先 <code>pull</code> 一次（打开本界面也会自动拉），然后读 <code>memory/astrbot/DIGEST.md</code>（去重速览），不够再翻 <code>MEMORY.md</code> 和 <code>recent.md</code>；有值得记住的事就用本页「记一条」或命令行 <code>python memory\bridge\astrbot_bridge.py note "…"</code>，再 <code>push</code>。</p>
+      <p><b>命令行等价物：</b></p>
+      <ol>
+        <li><code>python memory\bridge\astrbot_bridge.py status | pull | push | activity | selftest</code></li>
+        <li><code>python memory\bridge\astrbot_bridge.py note "一句话事实" --tags 项目,偏好</code></li>
+        <li><code>一键记忆互通.cmd --cli</code> 打开旧的命令行流程</li>
+      </ol>
+      <p><b>前提与限制：</b>本机要能连到 6185（面板隧道）与 8899（本机面板）；隧道断了会自动请面板重开。对话记录没有逐条时间戳，只有会话最后活跃时间；只同步长期记忆、对话、人设和 DSH 行为摘要，不同步图片与文件本身。</p>
+      <div class="row">
+        <button class="btn tiny ghost" id="openmem">📂 打开 memory 目录</button>
+        <button class="btn tiny ghost" id="stop">⏹ 关闭服务</button>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+  记忆桥 · 本地运行，数据只在你自己的电脑和云服务器之间流动
+  <button id="quit" class="linkbtn" title="关掉后台服务">退出应用</button>
+</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let running = false;
+
+function toast(msg){
+  const t = $("#toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+async function api(path, body){
+  const opt = body === undefined ? {} : {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  };
+  const r = await fetch(path, opt);
+  return await r.json();
+}
+
+function logLine(text, cls){
+  const el = $("#log");
+  if (el.dataset.clean !== "1"){ el.innerHTML = ""; el.dataset.clean = "1"; }
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = text;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog(){ $("#log").innerHTML = ""; $("#log").dataset.clean = "1"; }
+
+function setBusy(b){
+  running = b;
+  document.querySelectorAll("[data-task]").forEach(x => x.disabled = b);
+}
+
+/* ---------- 会话挑选 ---------- */
+const SESS = { workspace: "", rows: [], selected: new Set(), state: null };
+
+function fillWorkspaces(list, current){
+  const sel = $("#ws");
+  sel.innerHTML = "";
+  for (const w of list){
+    const o = document.createElement("option");
+    o.value = w.key;
+    o.textContent = `${w.cwd}（${w.count} 条 · ${w.last}）`;
+    sel.appendChild(o);
+  }
+  if (current) sel.value = current;
+}
+
+function updateSessCount(){
+  $("#sesscount").textContent = `已选 ${SESS.selected.size} 条`;
+  $("#sesssync").disabled = SESS.selected.size === 0;
+}
+
+function renderSessions(state){
+  SESS.state = state || SESS.state;
+  const box = $("#acts");
+  box.innerHTML = "";
+  if (!SESS.rows.length){
+    box.innerHTML = '<div class="empty">这个工作区还没有会话记录。</div>';
+    updateSessCount();
+    return;
+  }
+  const synced = ((SESS.state && SESS.state.activity) || []).map(a => String(a.id || ""));
+  for (const r of SESS.rows){
+    const d = document.createElement("label");
+    d.className = "item sess";
+    const kb = Math.max(1, Math.round((r.size || 0) / 1024));
+    const done = synced.some(id => id.endsWith(r.id));
+    d.innerHTML = `<input type="checkbox" class="sessbox">
+      <div class="sessmain">
+        <div class="top"><span class="title"></span>
+        <span class="meta">${r.when || ""} · ${kb} KB${done ? ' <span class="tag ok">已同步</span>' : ""}</span></div>
+      </div>`;
+    d.querySelector(".title").textContent = r.title || "（未命名会话）";
+    const cb = d.querySelector(".sessbox");
+    cb.checked = SESS.selected.has(r.key);
+    cb.onchange = () => {
+      if (cb.checked) SESS.selected.add(r.key); else SESS.selected.delete(r.key);
+      updateSessCount();
+    };
+    box.appendChild(d);
+  }
+  updateSessCount();
+}
+
+async function loadSessions(ws){
+  try{
+    const r = await api("/api/sessions" + (ws ? "?workspace=" + encodeURIComponent(ws) : ""));
+    if (!r.ok) throw new Error(r.error || "读取会话失败");
+    fillWorkspaces(r.workspaces || [], r.workspace);
+    if (r.workspace !== SESS.workspace){ SESS.workspace = r.workspace; SESS.selected.clear(); }
+    SESS.rows = r.sessions || [];
+    renderSessions(SESS.state);
+  }catch(e){
+    $("#acts").innerHTML = "";
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "读不到会话列表：" + e.message;
+    $("#acts").appendChild(d);
+  }
+}
+
+async function syncSelected(){
+  if (!SESS.selected.size || running) return;
+  setBusy(true);
+  clearLog();
+  logLine("同步选中的 " + SESS.selected.size + " 条会话 …", "dim");
+  try{
+    const r = await api("/api/activity", {sessions: [...SESS.selected]});
+    if (!r.ok) throw new Error(r.error || "启动失败");
+    await poll(r.id, 0);
+    SESS.selected.clear();
+    await loadSessions(SESS.workspace);
+  }catch(e){
+    logLine("启动失败：" + e.message, "err");
+  }
+  setBusy(false);
+  refresh();
+}
+
+async function refresh(){
+  try{
+    const s = await api("/api/state");
+    if (!s.ok) throw new Error(s.error || "状态读取失败");
+    $("#dot").className = "dot" + (s.online ? "" : " off");
+    $("#online").textContent = s.online ? "已连接 AstrBot" : "连不上 AstrBot（检查隧道）";
+    $("#c-mem").textContent = s.counts.memories ?? "–";
+    $("#c-msg").textContent = s.counts.messages ?? "–";
+    $("#c-per").textContent = s.counts.personas ?? "–";
+    $("#c-note").textContent = s.counts.notes ?? "–";
+
+    renderSessions(s);
+
+    const notes = $("#notes");
+    notes.innerHTML = "";
+    if (!s.notes.length){
+      notes.innerHTML = '<div class="empty">还没有笔记。</div>';
+    } else {
+      for (const n of s.notes){
+        const d = document.createElement("div");
+        d.className = "item";
+        d.innerHTML = `<div class="top"><span class="title"></span><span class="meta"></span></div>`;
+        d.querySelector(".title").textContent = (n.text || "").slice(0, 46) + ((n.text || "").length > 46 ? "…" : "");
+        d.querySelector(".meta").textContent = n.ts || "";
+        notes.appendChild(d);
+      }
+    }
+  }catch(e){
+    $("#online").textContent = "界面读取失败：" + e.message;
+    $("#dot").className = "dot off";
+  }
+}
+
+async function poll(id, from){
+  while (true){
+    let j;
+    try{ j = await api(`/api/job?id=${encodeURIComponent(id)}&from=${from}`); }
+    catch(e){ await new Promise(r => setTimeout(r, 600)); continue; }
+    if (!j.ok) break;
+    for (const line of j.lines){
+      const cls = /失败|出错|错误|!|Error/.test(line) ? "err" : (/\[.*\] (一键|拉取|推送|回传|自检|查看)/.test(line) ? "" : "");
+      logLine(line, cls);
+    }
+    from = j.total;
+    if (j.done){
+      toast(j.rc === 0 ? "完成 ✓" : "有错误，看日志");
+      break;
+    }
+    await new Promise(r => setTimeout(r, 450));
+  }
+  setBusy(false);
+  refresh();
+}
+
+async function run(task){
+  if (running) return;
+  setBusy(true);
+  clearLog();
+  logLine("启动：" + task + " …", "dim");
+  try{
+    const r = await api("/api/run", {task});
+    if (!r.ok) throw new Error(r.error || "启动失败");
+    await poll(r.id, 0);
+  }catch(e){
+    logLine("启动失败：" + e.message, "err");
+    setBusy(false);
+  }
+}
+
+document.querySelectorAll("[data-task]").forEach(btn => {
+  btn.addEventListener("click", () => run(btn.dataset.task));
+});
+
+$("#imp").addEventListener("input", e => $("#impv").textContent = Number(e.target.value).toFixed(2));
+
+async function saveNote(push){
+  const text = $("#note").value.trim();
+  if (!text){ toast("先写点内容吧"); $("#note").focus(); return; }
+  setBusy(true);
+  try{
+    const r = await api("/api/note", {text, tags: $("#tags").value, importance: Number($("#imp").value), push});
+    if (!r.ok){ toast("保存失败"); }
+    else {
+      toast(push ? (r.pushed === 0 ? "已保存并推送（目标已存在）" : "已保存并推送 ✓") : "已保存");
+      $("#note").value = "";
+    }
+  }catch(e){ toast("保存失败：" + e.message); }
+  setBusy(false);
+  refresh();
+}
+
+$("#save").addEventListener("click", () => saveNote(true));
+$("#saveonly").addEventListener("click", () => saveNote(false));
+$("#note").addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); saveNote(true); }
+});
+
+$("#openmem").addEventListener("click", async () => { await api("/api/open", {target: "memory"}); });
+$("#stop").addEventListener("click", async () => {
+  toast("正在关闭…");
+  await api("/api/stop", {});
+  setTimeout(() => { document.body.innerHTML = '<div style="padding:60px;text-align:center;font-family:system-ui;color:#8d5a70">记忆桥已关闭，可以关掉这个标签页了 🌸</div>'; }, 500);
+});
+
+refresh();
+setInterval(refresh, 30000);
+loadSessions();
+$("#ws").onchange = (e) => loadSessions(e.target.value);
+$("#sessreload").onclick = () => loadSessions(SESS.workspace);
+$("#sessall").onclick = () => { SESS.rows.forEach(r => SESS.selected.add(r.key)); renderSessions(); };
+$("#sessnone").onclick = () => { SESS.selected.clear(); renderSessions(); };
+$("#sesssync").onclick = syncSelected;
+$("#gotosess").onclick = () => {
+  const card = $("#ws").closest("section");
+  if (card) card.scrollIntoView({behavior: "smooth", block: "start"});
+  loadSessions(SESS.workspace);
+  toast("在下面勾要同步的会话，再点「同步选中的」");
+};
+
+$("#quit").onclick = async () => {
+  if (!confirm("关掉记忆桥的后台服务？关掉后这个页面就没用了，下次再双击打开。")) return;
+  try { await api("/api/stop", {}); } catch(e) {}
+  document.body.innerHTML = '<div style="padding:60px 24px;text-align:center;font-size:15px;color:#8a6a74">' +
+    '已经关掉了。下次要用，再双击那个「记忆互通」。<br><br>' +
+    '<span style="font-size:12px">这个标签页可以直接关了。</span></div>';
+};
+
+async function refreshRt(){
+  try{
+    const r = await api("/api/realtime");
+    const on = !!r.running;
+    $("#rtdot").className = "dot" + (on ? "" : " off");
+    $("#rttext").textContent = on ? "运行中" : "未开启";
+    $("#rtstart").disabled = on;
+    $("#rtstop").disabled = !on;
+    const bits = [];
+    if (on){
+      bits.push(`拉取 ${r.pulls} 次`);
+      bits.push(`推送 ${r.pushes} 次`);
+      if (r.interval) bits.push(`间隔 ${r.interval}s`);
+      if (r.lastPull) bits.push("上次拉取 " + r.lastPull);
+      if (r.lastPush) bits.push("上次推送 " + r.lastPush);
+    }
+    if (r.lastError) bits.push("最近错误：" + r.lastError);
+    $("#rtmeta").textContent = bits.join(" · ") || "点「开启」让它一直跑着";
+  }catch(e){ /* 服务没起来就安静着 */ }
+}
+
+$("#rtstart").onclick = async () => {
+  const r = await api("/api/realtime", {action: "start"});
+  toast(r.ok ? "已开启实时同步" : "开启失败：" + (r.error || "未知错误"));
+  refreshRt();
+};
+$("#rtstop").onclick = async () => {
+  await api("/api/realtime", {action: "stop"});
+  toast("已停止实时同步");
+  refreshRt();
+};
+setInterval(refreshRt, 5000);
+refreshRt();
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+name: build-exe
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build (onefile + onedir)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File tools\build-exe.ps1 -Python (Get-Command python).Source
+
+      - name: Zip artifacts
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}"
+          if (-not $v) { $v = "dev" }
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          Copy-Item dist\app\记忆互通.exe out\
+          Copy-Item 使用说明.txt out\
+          Compress-Archive -Path out\* -DestinationPath "out/记忆互通-$v-桌面版.zip"
+          Compress-Archive -Path dist\app-dir\记忆互通 -DestinationPath "out/记忆互通-$v-免安装.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memory-bridge-windows
+          path: out/*.zip

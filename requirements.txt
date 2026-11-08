@@ -1,0 +1,6 @@
+# 1) 必需：Python 3.14 以下没有 compression.zstd，而 DSH 会话是 zstd 压缩的
+zstandard>=0.22
+
+# 2) 桌面版（托盘 + 图标）才需要；只跑 bridge/app.py 可以不装
+pystray>=0.19
+pillow>=10

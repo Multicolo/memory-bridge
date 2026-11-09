@@ -24,8 +24,11 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -127,8 +130,9 @@ def pid_alive(pid: int) -> bool:
 
 
 class Daemon:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, quiet: bool = False):
         self.cfg = cfg
+        self.quiet = quiet
         self.bot = bridge.AstrBot(bridge.load_config())
         self.lock = threading.Lock()
         self.stop = threading.Event()
@@ -138,6 +142,7 @@ class Daemon:
         self.pushes = 0
         self.failures = 0
         self.last_error = ""
+        self.last_seen = None
 
     def _mtime(self) -> float:
         try:
@@ -148,14 +153,27 @@ class Daemon:
     # -- 拉 ------------------------------------------------------------
     def pull_once(self) -> None:
         with self.lock:
+            buf = io.StringIO()
             try:
-                code = bridge.cmd_pull(self.bot, int(self.cfg["chats"]))
+                with contextlib.redirect_stdout(buf):
+                    code = bridge.cmd_pull(self.bot, int(self.cfg["chats"]))
                 self.pulls += 1
                 ok = code == 0
                 if not ok:
                     self.failures += 1
                 write_status(lastPull=now(), lastPullOk=ok, pulls=self.pulls,
                              failures=self.failures, lastError=self.last_error)
+                # 静默模式只在"记忆/对话条数变了"的时候说一句，避免每 20 秒刷一行
+                out = buf.getvalue()
+                mem = re.search(r"记忆 (\d+) 条", out)
+                chat = re.search(r"对话 (\d+) 条", out)
+                counts = (mem.group(1), chat.group(1) if chat else "?") if mem else None
+                if not self.quiet:
+                    sys.stdout.write(out)
+                    sys.stdout.flush()
+                elif counts and counts != self.last_seen:
+                    self.last_seen = counts
+                    log(f"记忆 {counts[0]} 条 · 对话 {counts[1]} 条")
             except Exception as error:  # 网络抖动不该打死守护进程
                 self.failures += 1
                 self.last_error = f"{type(error).__name__}: {error}"
@@ -166,8 +184,10 @@ class Daemon:
     # -- 推 ------------------------------------------------------------
     def push_once(self, reason: str) -> None:
         with self.lock:
+            buf = io.StringIO()
             try:
-                code = bridge.cmd_push(self.bot, NOTE_FILE, False, 200)
+                with contextlib.redirect_stdout(buf):
+                    code = bridge.cmd_push(self.bot, NOTE_FILE, False, 200)
                 self.pushes += 1
                 ok = code == 0
                 if not ok:
@@ -178,10 +198,13 @@ class Daemon:
                 if ok:
                     # 推完再拉一次，让她刚记住的东西立刻出现在这边
                     try:
-                        bridge.cmd_pull(self.bot, int(self.cfg["chats"]))
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            bridge.cmd_pull(self.bot, int(self.cfg["chats"]))
                         write_status(lastPull=now(), lastPullOk=True)
                     except Exception:
                         pass
+                elif not self.quiet:
+                    sys.stdout.write(buf.getvalue())
             except Exception as error:
                 self.failures += 1
                 self.last_error = f"{type(error).__name__}: {error}"
@@ -268,6 +291,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--interval", type=int, default=0, help="拉取间隔秒数，覆盖配置")
     ap.add_argument("--status", action="store_true", help="查看运行状态")
     ap.add_argument("--stop", action="store_true", help="停掉正在跑的实例")
+    ap.add_argument("--quiet", action="store_true",
+                    help="安静模式：只在记忆条数变化时写一行日志（后台常驻用）")
     args = ap.parse_args(argv)
 
     if args.status:
@@ -292,14 +317,14 @@ def main(argv: list[str]) -> int:
         cfg["interval"] = max(5, args.interval)
 
     if args.once:
-        d = Daemon(cfg)
+        d = Daemon(cfg, quiet=args.quiet)
         d.pull_once()
         d.push_once("手动跑一轮")
         return 0
 
     if not acquire_lock():
         return 0
-    daemon = Daemon(cfg)
+    daemon = Daemon(cfg, quiet=args.quiet)
     try:
         return daemon.run()
     except KeyboardInterrupt:

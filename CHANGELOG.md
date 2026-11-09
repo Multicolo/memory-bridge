@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.2
+
+**实时同步更安静、更耐活**
+
+- `realtime.py --quiet`：只在记忆/对话条数变化时写一行，不再每 20 秒刷一段日志（连续跑一晚从 190 KB 降到几十 KB）
+- 桌面版的「实时同步」开关、界面里的守护进程都默认走静默模式
+- 后台常驻推荐用独立进程启动，不挂在 DSH 的后台任务上（关掉对话窗口也继续跑）：
+  `Start-Process -FilePath python -ArgumentList "realtime.py","--interval","30","--quiet" -WindowStyle Hidden`
+- `--stop` 照旧能停（pid 记在 `realtime.json`）
+
+**修的问题**
+
+- 1.1.1 源码包里的 `bridge/realtime.py` 是 1.1.0 之后的旧文件（比 exe 里少几行），这次三处（仓库 / exe / 源码包）用同一份
+
 ## 1.1.1
 
 **首次设置窗重做**

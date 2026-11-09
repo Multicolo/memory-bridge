@@ -335,7 +335,7 @@ def rt_start() -> dict:
             return {"ok": True, "already": True}
         try:
             cfg = rt.settings()
-            daemon = rt.Daemon(cfg)
+            daemon = rt.Daemon(cfg, quiet=True)
             thread = threading.Thread(target=daemon.run, name="realtime", daemon=True)
             thread.start()
             _RT.update(daemon=daemon, thread=thread, error="")

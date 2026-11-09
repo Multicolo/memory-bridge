@@ -22,13 +22,13 @@ DSH 这边做过的事，也能回到 bot 的记忆里。不用复制粘贴，�
 
 | 文件 | 适合 | 大小 |
 | --- | --- | --- |
-| `memory-bridge-1.1.1-windows-onefile.zip` | 单文件 exe，解压双击就能用 | ~30 MB |
-| `memory-bridge-1.1.1-windows-folder.zip` | 文件夹版，启动快，整个文件夹一起拷 | ~31 MB |
-| `memory-bridge-1.1.1-source.zip` | 想看代码 / 自己编译 | ~240 KB |
+| `memory-bridge-1.1.2-windows-onefile.zip` | 单文件 exe，解压双击就能用 | ~30 MB |
+| `memory-bridge-1.1.2-windows-folder.zip` | 文件夹版，启动快，整个文件夹一起拷 | ~31 MB |
+| `memory-bridge-1.1.2-source.zip` | 想看代码 / 自己编译 | ~240 KB |
 
 要求：Windows 10/11 64 位。
 
-> exe 是 1.1.1 构建的，首次设置窗是粉色那版，也带「人格与记忆传送」；1.1.0 及更早的 exe 没有这些。
+> exe 是 1.1.2 构建的，首次设置窗是粉色那版，也带「人格与记忆传送」；1.1.0 及更早的 exe 没有这些。
 > 单文件版启动稍慢（要解压到临时目录），文件夹版启动快，功能完全一样。
 
 ## 快速开始（用 exe）

@@ -28,7 +28,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent          # memory/bridge
 MEM_ROOT = HERE.parent                          # memory
 WORKSPACE = MEM_ROOT.parent                     # 工作区
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 NAME = f"记忆互通-{VERSION}-源码"
 
 PY_FILES = [

@@ -23,6 +23,7 @@ DSH 这边做过的事，也能回到 bot 的记忆里。不用复制粘贴，�
 | 文件 | 适合 | 大小 |
 | --- | --- | --- |
 | `memory-bridge-1.1.2-windows-onefile.zip` | 单文件 exe，解压双击就能用 | ~30 MB |
+| `memory-bridge-1.1.2-windows-onefile-folder.zip` | 同一个单文件 exe，但压进 `记忆互通-1.1.2\` 文件夹（解压后不会散一地） | ~30 MB |
 | `memory-bridge-1.1.2-windows-folder.zip` | 文件夹版，启动快，整个文件夹一起拷 | ~31 MB |
 | `memory-bridge-1.1.2-source.zip` | 想看代码 / 自己编译 | ~240 KB |
 
